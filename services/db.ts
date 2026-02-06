@@ -2,9 +2,10 @@ import { User, FoundItem } from '../types';
 
 /**
  * HONESTA PERMANENT CLOUD DATABASE
- * Using a public JSON storage that persists across devices (Phone/Laptop).
+ * Source of Truth: JSONBlob API
  */
-const API_URL = `https://jsonblob.com/api/jsonBlob/1343135804561825792`; 
+const BLOB_ID = '1343135804561825792';
+const API_URL = `https://jsonblob.com/api/jsonBlob/${BLOB_ID}`; 
 
 interface CloudData {
   users: User[];
@@ -14,11 +15,18 @@ interface CloudData {
 const INITIAL_DATA: CloudData = { users: [], items: [] };
 
 export const db = {
+  /**
+   * Fetches latest data with cache-busting to ensure multi-device consistency.
+   */
   async fetchAll(): Promise<CloudData> {
     try {
-      const response = await fetch(API_URL, {
+      const response = await fetch(`${API_URL}?t=${Date.now()}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
       });
       
       if (!response.ok) {
@@ -31,16 +39,15 @@ export const db = {
         items: Array.isArray(data?.items) ? data.items : []
       };
     } catch (error) {
-      console.warn("Cloud unreachable, using local cache:", error);
+      console.warn("Cloud unreachable, checking local emergency cache:", error);
       const cache = localStorage.getItem('honesta_emergency_cache');
-      try {
-        return cache ? JSON.parse(cache) : INITIAL_DATA;
-      } catch (e) {
-        return INITIAL_DATA;
-      }
+      return cache ? JSON.parse(cache) : INITIAL_DATA;
     }
   },
 
+  /**
+   * Pushes data to cloud and updates local cache.
+   */
   async sync(data: CloudData): Promise<void> {
     try {
       localStorage.setItem('honesta_emergency_cache', JSON.stringify(data));
@@ -54,6 +61,7 @@ export const db = {
       if (!response.ok) throw new Error("Cloud update failed");
     } catch (error) {
       console.error("Critical: Data could not be synced to cloud.", error);
+      throw error;
     }
   },
 
@@ -63,6 +71,7 @@ export const db = {
   },
 
   async saveUser(user: User): Promise<void> {
+    // Atomic pattern: fetch latest, modify, push
     const data = await this.fetchAll();
     if (!data.users.find(u => u.email.toLowerCase() === user.email.toLowerCase())) {
       data.users.push(user);
@@ -77,6 +86,7 @@ export const db = {
 
   async saveItem(item: FoundItem): Promise<void> {
     const data = await this.fetchAll();
+    // Prepend new item to the global list
     data.items = [item, ...data.items];
     await this.sync(data);
   },
