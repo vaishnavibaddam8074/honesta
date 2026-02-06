@@ -1,16 +1,19 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 export async function generateVerificationQuestions(base64Image: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Analyze this lost item image and generate:
-  1. A CATEGORY title (e.g., "Pen", "Bag", "Smartphone").
-  2. Dynamic Verification Questions:
-     - If the item is low-value (stationary, etc.), ask 1 question about COLOR or distinct physical mark.
-     - If the item is high-value (Phone, Wallet, Electronics), ask 2-3 specific questions (Color, Brand, Model, Case type).
-  CRITICAL: The public only sees a very dark B&W photo. Ask questions about details NOT visible in the dark silhouette.
-  Provide output in JSON format.`;
-
   try {
+    // Moved inside to catch environment/key reference errors
+    const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
+    const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+    
+    const prompt = `Analyze this lost item image and generate:
+    1. A CATEGORY title (e.g., "Pen", "Bag", "Smartphone").
+    2. Dynamic Verification Questions:
+       - If the item is low-value (stationary, etc.), ask 1 question about COLOR or distinct physical mark.
+       - If the item is high-value (Phone, Wallet, Electronics), ask 2-3 specific questions (Color, Brand, Model, Case type).
+    CRITICAL: The public only sees a very dark B&W photo. Ask questions about details NOT visible in the dark silhouette.
+    Provide output in JSON format.`;
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
@@ -39,27 +42,34 @@ export async function generateVerificationQuestions(base64Image: string) {
       }
     });
 
-    return JSON.parse(response.text);
+    return JSON.parse(response.text || '{}');
   } catch (error) {
     console.error("Gemini Generation Error:", error);
+    // Return a safe fallback so the upload doesn't fail
     return {
       title: "Found Item",
-      questions: ["Describe the specific color or marking of this item."],
+      questions: ["Please describe the specific color or any unique identification marks of this item."],
       answers: ["any"]
     };
   }
 }
 
 export async function verifyAnswers(questions: string[], userAnswers: string[], correctAnswers: string[]) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Verify if the user answers match the correct reference answers for a lost item claim. 
-  Be flexible with natural language (e.g., 'blue' matches 'dark blue', 'samsung' matches 'samsung galaxy').
-  Questions: ${JSON.stringify(questions)}
-  User Answers: ${JSON.stringify(userAnswers)}
-  Correct Reference: ${JSON.stringify(correctAnswers)}
-  If the answers show clear knowledge of the item, return isCorrect: true. Otherwise, false.`;
-
   try {
+    const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
+    const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+
+    const prompt = `Act as an ownership verifier for a lost and found system.
+    Match the user's answers against the correct reference answers.
+    User's responses are valid if they show specific knowledge of the item.
+    Be flexible with natural language: "navy" matches "blue", "apple" matches "iphone".
+    
+    Questions: ${JSON.stringify(questions)}
+    User Answers: ${JSON.stringify(userAnswers)}
+    Correct Reference: ${JSON.stringify(correctAnswers)}
+    
+    Return isCorrect: true only if most key details match.`;
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
@@ -74,13 +84,15 @@ export async function verifyAnswers(questions: string[], userAnswers: string[], 
         }
       }
     });
-    return JSON.parse(response.text).isCorrect;
+    
+    return JSON.parse(response.text || '{"isCorrect":false}').isCorrect;
   } catch (error) {
     console.error("Gemini Verification Error:", error);
-    // Safety fallback: partial string matching if AI fails
-    return userAnswers.some((ans, i) => 
-      ans.toLowerCase().includes(correctAnswers[i].toLowerCase()) || 
-      correctAnswers[i].toLowerCase().includes(ans.toLowerCase())
-    );
+    // Simple fallback string matching if AI is unreachable
+    return userAnswers.some((ans, i) => {
+      const u = ans.toLowerCase().trim();
+      const c = (correctAnswers[i] || "").toLowerCase().trim();
+      return u === c || u.includes(c) || c.includes(u);
+    });
   }
 }

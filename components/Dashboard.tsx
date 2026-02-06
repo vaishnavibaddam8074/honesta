@@ -59,7 +59,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       if (selectedItem) {
         const fresh = cloudItems.find(it => it.id === selectedItem.id);
         if (!fresh) {
-          setSelectedItem(null); // Item was deleted
+          setSelectedItem(null); 
         } else if (JSON.stringify(fresh) !== JSON.stringify(selectedItem)) {
           setSelectedItem(fresh);
         }
@@ -114,10 +114,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       let answers: string[] = [];
 
       if (useAI) {
-        const aiData = await generateVerificationQuestions(capturedImage);
-        title = aiData.title;
-        questions = aiData.questions;
-        answers = aiData.answers;
+        try {
+          const aiData = await generateVerificationQuestions(capturedImage);
+          title = aiData.title || "Found Item";
+          questions = aiData.questions || ["Please describe the item."];
+          answers = aiData.answers || [""];
+        } catch (aiErr) {
+          console.warn("AI Question Generation failed, falling back to manual questions.", aiErr);
+          title = "Found Item";
+          questions = ["What is the color of this item?"];
+          answers = [""];
+        }
       } else {
         questions = manualQuestions.map(m => m.q);
         answers = manualQuestions.map(m => m.a);
@@ -145,7 +152,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       setUploadStep('thankYou');
       triggerToast("Upload Successful! ✅");
     } catch (err) { 
-      alert("Sync failed."); 
+      console.error("Upload process failed:", err);
+      alert("System Sync failed. Please check your connection and try again."); 
     } finally { 
       setIsUploading(false); 
     }
@@ -154,10 +162,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const handleClaim = async () => {
     if (!selectedItem) return;
     setIsVerifying(true);
-    const isCorrect = await verifyAnswers(selectedItem.verificationQuestions, userAnswers, selectedItem.verificationAnswers);
-    if (isCorrect) setVerificationResult('success');
-    else setVerificationResult('fail');
-    setIsVerifying(false);
+    try {
+      const isCorrect = await verifyAnswers(selectedItem.verificationQuestions, userAnswers, selectedItem.verificationAnswers);
+      if (isCorrect) setVerificationResult('success');
+      else setVerificationResult('fail');
+    } catch (err) {
+      alert("Verification server busy. Please try again in a moment.");
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const sendMessage = async () => {
@@ -194,7 +207,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           setTimeout(() => { setUploadStep('none'); setNewlyCreatedItem(null); }, 2000);
         }
       } catch (err) {
-        alert("Sync error.");
+        alert("Status update failed. Check cloud connection.");
       } finally {
         setIsRefreshing(false);
       }
@@ -257,7 +270,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
               <div className="space-y-4">
                 <button onClick={startCamera} className="w-full flex items-center justify-between bg-indigo-600 hover:bg-indigo-700 text-white font-black p-6 rounded-[2rem] shadow-lg transition-all active:scale-95 group">
                   <span className="text-xl tracking-tighter">Camera Scan</span>
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" strokeWidth="3"/></svg>
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812-1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" strokeWidth="3"/></svg>
                 </button>
                 <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between bg-gray-50 text-indigo-800 font-black p-6 rounded-[2rem] transition-all hover:bg-indigo-50 border-2 border-dashed border-gray-200">
                   <span className="text-lg tracking-tighter">Choose Image</span>
