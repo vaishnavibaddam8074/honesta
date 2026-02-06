@@ -1,7 +1,10 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => {
+  const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
+  return new GoogleGenAI({ apiKey: apiKey || '' });
+};
 
 export async function generateVerificationQuestions(base64Image: string) {
   const ai = getAI();
