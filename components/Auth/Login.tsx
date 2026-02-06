@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { UserRole, User } from '../../types';
 import { db } from '../../services/db';
@@ -52,7 +51,7 @@ const Login: React.FC<LoginProps> = ({ role, onLogin, onSwitchToRegister }) => {
           <input
             type="email" required
             className="w-full px-6 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
-            placeholder={role === UserRole.STUDENT ? 'rollno@cmrithyderabad.edu.in' : 'name@cmritonline.ac.in'}
+            placeholder=""
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />

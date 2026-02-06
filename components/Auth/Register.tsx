@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { UserRole, User } from '../../types';
 import { db } from '../../services/db';
@@ -87,7 +86,7 @@ const Register: React.FC<RegisterProps> = ({ role, onRegister, onSwitchToLogin }
           />
         </div>
         <div>
-          <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-widest px-1">Mobile Number (Accountability)</label>
+          <label className="block text-[10px] font-black text-gray-500 mb-1 uppercase tracking-widest px-1">Mobile Number</label>
           <input
             type="tel" required pattern="[0-9]{10}"
             className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
@@ -101,7 +100,7 @@ const Register: React.FC<RegisterProps> = ({ role, onRegister, onSwitchToLogin }
           <input
             type="email" required
             className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold"
-            placeholder="hallticket@cmrithyderabad.edu.in"
+            placeholder=""
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
           />
