@@ -1,0 +1,7 @@
+{
+  "name": "HONESTA - CMRIT Lost & Found",
+  "description": "A secure lost and found platform for CMRIT students and faculty using image verification and automated security questions.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
