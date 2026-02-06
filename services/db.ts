@@ -1,4 +1,3 @@
-
 import { User, FoundItem } from '../types';
 
 /**
@@ -27,7 +26,6 @@ export const db = {
       }
       
       const data = await response.json();
-      // Safety check to ensure data is an object and contains arrays
       return {
         users: Array.isArray(data?.users) ? data.users : [],
         items: Array.isArray(data?.items) ? data.items : []
@@ -86,6 +84,12 @@ export const db = {
   async updateItem(updatedItem: FoundItem): Promise<void> {
     const data = await this.fetchAll();
     data.items = data.items.map(it => it.id === updatedItem.id ? updatedItem : it);
+    await this.sync(data);
+  },
+
+  async deleteItem(itemId: string): Promise<void> {
+    const data = await this.fetchAll();
+    data.items = data.items.filter(it => it.id !== itemId);
     await this.sync(data);
   }
 };
