@@ -1,16 +1,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+function cleanJsonResponse(text: string): string {
+  return text.replace(/```json\n?|```/g, "").trim();
+}
+
 export async function generateVerificationQuestions(base64Image: string) {
-  // Use process.env.API_KEY directly as required by guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const promptText = `Analyze this lost item image and generate:
-  1. A CATEGORY title (e.g., "Pen", "Bag", "Smartphone").
-  2. Dynamic Verification Questions:
-     - If the item is low-value (stationary, etc.), ask 1 question about COLOR or distinct physical mark.
-     - If the item is high-value (Phone, Wallet, Electronics), ask 2-3 specific questions (Color, Brand, Model, Case type).
-  CRITICAL: The public only sees a very dark B&W photo. Ask questions about details NOT visible in the dark silhouette.
-  Provide output in JSON format.`;
+  const promptText = `Analyze this lost item image.
+  Return JSON: { "title": "Category Name", "questions": ["Q1", "Q2", "Q3"], "answers": ["A1", "A2", "A3"] }
+  IMPORTANT: Provide EXACTLY 3 specific questions about hidden details like serial numbers, marks, or specific textures.
+  Do not exceed 3 questions.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -20,7 +20,7 @@ export async function generateVerificationQuestions(base64Image: string) {
           {
             inlineData: {
               mimeType: 'image/jpeg',
-              data: base64Image.split(',')[1], // Extract base64 part
+              data: base64Image.split(',')[1],
             },
           },
           { text: promptText },
@@ -32,30 +32,37 @@ export async function generateVerificationQuestions(base64Image: string) {
           type: Type.OBJECT,
           properties: {
             title: { type: Type.STRING },
-            questions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
+            questions: { 
+              type: Type.ARRAY, 
+              items: { type: Type.STRING },
+              description: "Maximum 3 questions"
             },
-            answers: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
+            answers: { 
+              type: Type.ARRAY, 
+              items: { type: Type.STRING },
+              description: "Maximum 3 answers"
             }
           },
           required: ["title", "questions", "answers"],
-          propertyOrdering: ["title", "questions", "answers"]
         },
       },
     });
 
-    // Use .text property as per guidelines
-    const jsonStr = response.text || "{}";
-    return JSON.parse(jsonStr);
+    const jsonStr = cleanJsonResponse(response.text || "{}");
+    const data = JSON.parse(jsonStr);
+    
+    // Safety check to force max 3
+    if (data.questions && data.questions.length > 3) {
+      data.questions = data.questions.slice(0, 3);
+      data.answers = data.answers.slice(0, 3);
+    }
+    
+    return data;
   } catch (error) {
-    console.error("Gemini Generation Error:", error);
-    // Fallback if AI service fails
+    console.error("AI Generation Error:", error);
     return {
       title: "Found Item",
-      questions: ["Please describe the specific color or any unique identification marks of this item."],
+      questions: ["Please describe a unique physical detail of this item."],
       answers: ["any"]
     };
   }
@@ -64,16 +71,11 @@ export async function generateVerificationQuestions(base64Image: string) {
 export async function verifyAnswers(questions: string[], userAnswers: string[], correctAnswers: string[]) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const prompt = `Act as an ownership verifier for a lost and found system.
-  Match the user's answers against the correct reference answers.
-  User's responses are valid if they show specific knowledge of the item.
-  Be flexible with natural language: "navy" matches "blue", "apple" matches "iphone".
-  
+  const prompt = `Act as a validator. Match user answers to references. 
   Questions: ${JSON.stringify(questions)}
   User Answers: ${JSON.stringify(userAnswers)}
   Correct Reference: ${JSON.stringify(correctAnswers)}
-  
-  Return isCorrect: true only if most key details match.`;
+  Return JSON: { "isCorrect": boolean }`;
 
   try {
     const response = await ai.models.generateContent({
@@ -83,25 +85,19 @@ export async function verifyAnswers(questions: string[], userAnswers: string[], 
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
-          properties: {
-            isCorrect: { type: Type.BOOLEAN }
-          },
-          required: ["isCorrect"],
-          propertyOrdering: ["isCorrect"]
+          properties: { isCorrect: { type: Type.BOOLEAN } },
+          required: ["isCorrect"]
         }
       },
     });
     
-    const jsonStr = response.text || "{\"isCorrect\":false}";
+    const jsonStr = cleanJsonResponse(response.text || "{\"isCorrect\":false}");
     return JSON.parse(jsonStr).isCorrect;
   } catch (error) {
-    console.error("Gemini Verification Error:", error);
-    // Fallback: simple string matching
     return userAnswers.some((ans, i) => {
       const u = ans.toLowerCase().trim();
       const c = (correctAnswers[i] || "").toLowerCase().trim();
-      if (!u || !c) return false;
-      return u === c || u.includes(c) || c.includes(u);
+      return u !== "" && (u === c || u.includes(c));
     });
   }
 }

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { UserRole, User } from './types';
 import Login from './components/Auth/Login';
@@ -6,6 +5,7 @@ import Register from './components/Auth/Register';
 import Landing from './components/Landing';
 import Dashboard from './components/Dashboard';
 import Navbar from './components/Navbar';
+import { db } from './services/db';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -13,6 +13,9 @@ const App: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
 
   useEffect(() => {
+    // Warm up the database instantly
+    db.init();
+
     const savedUser = localStorage.getItem('honesta_logged_in_user');
     if (savedUser) {
       const user = JSON.parse(savedUser);
@@ -44,10 +47,10 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
+    <div className="min-h-screen bg-gray-50 pb-12 flex flex-col">
       <Navbar user={currentUser} onLogout={handleLogout} onHome={goHome} />
       
-      <main className="transition-all duration-300">
+      <main className="flex-grow transition-all duration-300">
         {view === 'landing' && (
           <Landing onSelectRole={handleSelectRole} />
         )}
@@ -73,9 +76,8 @@ const App: React.FC = () => {
         )}
       </main>
       
-      {/* Footer Branding */}
-      <footer className="mt-auto py-8 text-center text-gray-400 text-sm">
-        <p>&copy; {new Date().getFullYear()} HONESTA - CMRIT Hyderabad. Built for Trust.</p>
+      <footer className="py-8 text-center text-gray-400 text-[10px] font-black uppercase tracking-widest opacity-50">
+        <p>&copy; {new Date().getFullYear()} HONESTA - CMRIT Hyderabad. Proper Database Active.</p>
       </footer>
     </div>
   );
