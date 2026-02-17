@@ -32,7 +32,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(() => refreshData(false), 10000); 
+    const interval = setInterval(() => refreshData(false), 12000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -112,7 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         setShowCamera(true);
       }
     } catch (err) { 
-      alert("Camera access denied. Enable permissions in settings."); 
+      alert("Camera access denied. Check browser permissions."); 
     }
   };
 
@@ -139,13 +139,31 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const finalizeUpload = async (useAI: boolean) => {
     if (!capturedImage) return;
     setIsUploading(true);
-    setUploadProgress('Starting AI analysis...');
-    
-    let aiData;
     
     try {
+      // Step 1: Micro-Compress First (This is the most critical step for success)
+      setUploadProgress('Reducing file size...');
+      const [bwImage, compressedOrig] = await Promise.all([
+        convertToBlackAndWhite(capturedImage),
+        compressOriginalImage(capturedImage)
+      ]);
+
+      // Step 2: AI Analysis with fallback
+      let aiData = { 
+        title: "Found Item", 
+        questions: ["What color is this item?", "Describe one unique detail or brand."], 
+        answers: ["any", "any"] 
+      };
+
       if (useAI) {
-        aiData = await generateVerificationQuestions(capturedImage);
+        setUploadProgress('AI Analyzing (Viva)...');
+        try {
+          // Pass the ALREADY COMPRESSED image to AI for much faster response
+          const result = await generateVerificationQuestions(bwImage);
+          aiData = result;
+        } catch (aiErr) {
+          console.warn("AI Busy, using fallback questions...");
+        }
       } else {
         const limitedManual = manualQuestions.slice(0, 3);
         aiData = {
@@ -155,13 +173,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         };
       }
       
-      setUploadProgress('Compressing images for network...');
-      const [bwImage, compressedOrig] = await Promise.all([
-        convertToBlackAndWhite(capturedImage),
-        compressOriginalImage(capturedImage)
-      ]);
-      
-      setUploadProgress('Syncing to CMRIT Feed...');
+      // Step 3: Cloud Sync
+      setUploadProgress('Syncing to Feed...');
       const itemId = Math.random().toString(36).substr(2, 6).toUpperCase();
       const newItem: FoundItem = {
         id: itemId,
@@ -180,11 +193,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       
       await db.saveItem(newItem);
       setUploadStep('thankYou');
-      triggerToast("Post Live on CMRIT Feed! ✅");
+      triggerToast("Broadcast Live! ✅");
       refreshData(false);
     } catch (err: any) { 
-      console.error("Reporting Error", err);
-      alert("Network Sync Failed: Campus Wi-Fi might be slow. Please wait a moment and try again."); 
+      console.error("Critical Upload Error", err);
+      // We only alert if the DB sync fails, not if AI fails
+      alert("Network Sync Failed: Wi-Fi connection broken. Please move to a better spot and retry."); 
     } finally { 
       setIsUploading(false); 
       setUploadProgress('');
@@ -206,7 +220,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         recordFailedAttempt(selectedItem.id);
       }
     } catch (err) { 
-      alert("Verification server timed out. Check connection."); 
+      // If AI verify fails, do a local check
+      const passesLocal = userAnswers.some((ans, i) => {
+        const u = ans.toLowerCase().trim();
+        const c = selectedItem.verificationAnswers[i].toLowerCase().trim();
+        return u !== "" && (u === c || u.includes(c) || c.includes(u));
+      });
+      if (passesLocal) setVerificationResult('success');
+      else setVerificationResult('fail');
     } finally { 
       setIsVerifying(false); 
     }
@@ -325,10 +346,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             {uploadStep === 'vivaChoice' && (
               <div className="space-y-4 text-center py-4">
                 <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest mb-6">Verification Method</h4>
-                <button onClick={() => finalizeUpload(true)} disabled={isUploading} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-sm shadow-lg disabled:opacity-50 hover:bg-indigo-700 transition-all flex flex-col items-center justify-center">
+                <button onClick={() => finalizeUpload(true)} disabled={isUploading} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-sm shadow-lg disabled:opacity-50 hover:bg-indigo-700 transition-all flex flex-col items-center justify-center min-h-[5rem]">
                   {isUploading ? (
                     <div className="flex flex-col items-center">
-                       <span className="animate-pulse mb-1">Processing...</span>
+                       <span className="animate-pulse mb-1">In Progress...</span>
                        <span className="text-[8px] opacity-70 tracking-widest uppercase">{uploadProgress}</span>
                     </div>
                   ) : (
