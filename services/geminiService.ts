@@ -2,7 +2,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 function cleanJsonResponse(text: string): string {
   if (!text) return "{}";
-  // Remove markdown formatting if present
   let cleaned = text.replace(/```json\n?|```/g, "").trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
@@ -15,19 +14,17 @@ function cleanJsonResponse(text: string): string {
 export async function generateVerificationQuestions(base64Image: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const promptText = `Act as a helpful campus assistant. 
-  Analyze this image of a lost item. 
-  Generate 2 or 3 VERY SIMPLE verification questions.
-  Questions must be:
-  - Easy for everyone to understand (Simple English).
-  - Related to obvious features (Color, Brand, Shape, or unique stickers/scratches).
-  - Not too technical.
+  const promptText = `Analyze this image. 
+  Generate exactly 2 SIMPLE questions that anyone could understand to verify ownership.
+  Focus on:
+  1. Primary color or Brand.
+  2. One obvious shape or detail.
   
-  Return ONLY JSON format: 
+  Return ONLY JSON: 
   { 
     "title": "Short Item Name", 
-    "questions": ["Simple Question 1", "Simple Question 2"], 
-    "answers": ["Brief Answer 1", "Brief Answer 2"] 
+    "questions": ["Simple Q1", "Simple Q2"], 
+    "answers": ["Short A1", "Short A2"] 
   }`;
 
   try {
@@ -37,12 +34,7 @@ export async function generateVerificationQuestions(base64Image: string) {
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: imageData,
-            },
-          },
+          { inlineData: { mimeType: 'image/jpeg', data: imageData } },
           { text: promptText },
         ],
       },
@@ -52,16 +44,8 @@ export async function generateVerificationQuestions(base64Image: string) {
           type: Type.OBJECT,
           properties: {
             title: { type: Type.STRING },
-            questions: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING },
-              description: "2 or 3 simple questions"
-            },
-            answers: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING },
-              description: "2 or 3 brief answers"
-            }
+            questions: { type: Type.ARRAY, items: { type: Type.STRING } },
+            answers: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
           required: ["title", "questions", "answers"],
         },
@@ -69,27 +53,19 @@ export async function generateVerificationQuestions(base64Image: string) {
     });
 
     const text = response.text;
-    if (!text) throw new Error("Empty AI response");
+    if (!text) throw new Error("No AI text");
 
-    const jsonStr = cleanJsonResponse(text);
-    const data = JSON.parse(jsonStr);
-    
+    const data = JSON.parse(cleanJsonResponse(text));
     return {
       title: data.title || "Found Item",
-      questions: data.questions || ["What color is it?", "What brand is it?"],
+      questions: data.questions || ["What color is this item?", "What is the brand?"],
       answers: data.answers || ["any", "any"]
     };
   } catch (error) {
-    console.error("AI Generation Failed:", error);
-    // Reliable simple fallback
     return {
       title: "Found Item",
-      questions: [
-        "What is the main color of this item?",
-        "Is there any name or logo written on it?",
-        "Describe any one small detail (like a scratch or sticker)."
-      ],
-      answers: ["any", "any", "any"]
+      questions: ["What is the primary color of this item?", "Describe one unique feature or brand name visible on it."],
+      answers: ["any", "any"]
     };
   }
 }
@@ -97,15 +73,10 @@ export async function generateVerificationQuestions(base64Image: string) {
 export async function verifyAnswers(questions: string[], userAnswers: string[], correctAnswers: string[]) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const prompt = `You are a fair judge. 
-  Questions: ${JSON.stringify(questions)}
+  const prompt = `Questions: ${JSON.stringify(questions)}
   User Answers: ${JSON.stringify(userAnswers)}
   Correct Reference: ${JSON.stringify(correctAnswers)}
-  
-  Determine if the user's answers are substantially correct. 
-  Ignore minor spelling mistakes or case sensitivity (e.g., 'blue' is 'Blue').
-  Be lenient if they described the same thing.
-  
+  Is the user likely the owner? (Ignore minor typos).
   Return JSON: { "isCorrect": boolean }`;
 
   try {
@@ -122,20 +93,14 @@ export async function verifyAnswers(questions: string[], userAnswers: string[], 
       },
     });
     
-    const text = response.text;
-    if (!text) throw new Error("Empty AI response");
-    
-    const jsonStr = cleanJsonResponse(text);
-    return JSON.parse(jsonStr).isCorrect;
+    return JSON.parse(cleanJsonResponse(response.text)).isCorrect;
   } catch (error) {
-    console.error("AI Verification Failed:", error);
-    // Local fallback matching
     let matches = 0;
     userAnswers.forEach((ans, i) => {
       const u = (ans || "").toLowerCase().trim();
       const c = (correctAnswers[i] || "").toLowerCase().trim();
       if (u && (u === c || u.includes(c) || c.includes(u))) matches++;
     });
-    return matches >= Math.max(1, Math.floor(questions.length / 2));
+    return matches >= 1;
   }
 }

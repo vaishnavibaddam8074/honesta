@@ -7,8 +7,8 @@ export async function convertToBlackAndWhite(dataUrl: string): Promise<string> {
       const ctx = canvas.getContext('2d');
       if (!ctx) return resolve(dataUrl);
 
-      // Smaller dimensions for faster sync
-      const maxDim = 400; 
+      // Micro-dimensions for ultra-fast campus sync
+      const maxDim = 300; 
       let width = img.width;
       let height = img.height;
       if (width > height) {
@@ -19,12 +19,14 @@ export async function convertToBlackAndWhite(dataUrl: string): Promise<string> {
       canvas.width = width;
       canvas.height = height;
       
-      ctx.filter = 'grayscale(100%) brightness(40%) contrast(120%) blur(1px)';
+      // Grayscale and high contrast for privacy and size
+      ctx.filter = 'grayscale(100%) contrast(150%)';
       ctx.drawImage(img, 0, 0, width, height);
       
-      // Low quality jpeg to keep base64 string short
-      resolve(canvas.toDataURL('image/jpeg', 0.4));
+      // Lowest quality jpeg to keep string length minimal
+      resolve(canvas.toDataURL('image/jpeg', 0.2));
     };
+    img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
 }
@@ -38,7 +40,7 @@ export async function compressOriginalImage(dataUrl: string): Promise<string> {
       const ctx = canvas.getContext('2d');
       if (!ctx) return resolve(dataUrl);
       
-      const maxDim = 500; 
+      const maxDim = 400; 
       let width = img.width;
       let height = img.height;
       if (width > maxDim || height > maxDim) {
@@ -50,8 +52,9 @@ export async function compressOriginalImage(dataUrl: string): Promise<string> {
       canvas.height = height;
       ctx.drawImage(img, 0, 0, width, height);
       
-      resolve(canvas.toDataURL('image/jpeg', 0.4));
+      resolve(canvas.toDataURL('image/jpeg', 0.3));
     };
+    img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
 }

@@ -1,8 +1,8 @@
 import { User, FoundItem } from '../types';
 
 /**
- * HONESTA CLOUD ENGINE v2.2
- * Highly resilient storage for CMRIT campus networks.
+ * HONESTA CLOUD ENGINE v2.3
+ * Optimized for low-bandwidth campus environments.
  */
 const BLOB_ID = '1343135804561825792'; 
 const BASE_URL = `https://jsonblob.com/api/jsonBlob`;
@@ -14,18 +14,15 @@ interface CloudData {
 }
 
 const INITIAL_DATA: CloudData = { users: [], items: [] };
-const MAX_ITEMS = 30; 
+const MAX_ITEMS = 25; // Slightly reduced to save bandwidth
 
 let memoryCache: CloudData | null = null;
 let isInitializing = false;
 
 export const db = {
-  /**
-   * Safe fetch with extended 25s timeout for spotty CMRIT Wi-Fi
-   */
-  async safeFetch(url: string, options: RequestInit, retries = 3): Promise<Response> {
+  async safeFetch(url: string, options: RequestInit, retries = 2): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); 
+    const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
     try {
       const response = await fetch(url, {
@@ -42,8 +39,7 @@ export const db = {
     } catch (err) {
       clearTimeout(timeoutId);
       if (retries > 0) {
-        console.warn(`Fetch failed, retrying... (${retries} left)`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 1000));
         return this.safeFetch(url, options, retries - 1);
       }
       throw err;
@@ -58,9 +54,10 @@ export const db = {
       
       if (response.status === 404) {
         await this.sync(INITIAL_DATA, true);
-        memoryCache = INITIAL_DATA;
         return INITIAL_DATA;
       }
+
+      if (!response.ok) throw new Error("Server error");
 
       const data = await response.json();
       const sanitized: CloudData = {
@@ -72,7 +69,6 @@ export const db = {
       localStorage.setItem('honesta_backup', JSON.stringify(sanitized));
       return sanitized;
     } catch (error) {
-      console.warn("Cloud disconnected, using local storage backup.");
       const backup = localStorage.getItem('honesta_backup');
       memoryCache = backup ? JSON.parse(backup) : INITIAL_DATA;
       return memoryCache!;
@@ -91,15 +87,13 @@ export const db = {
         });
 
         if (putRes.status === 404) {
-          // If the hardcoded blob is gone, we try to re-init it
           await this.safeFetch(BASE_URL, {
             method: 'POST',
             body: JSON.stringify(data),
           });
-          console.warn("New storage bucket created due to 404.");
         }
       } catch (err) {
-        console.error("Cloud Sync failed completely. Data saved locally only.");
+        console.error("Cloud sync failed. Staying local.");
       }
     };
 
@@ -113,9 +107,7 @@ export const db = {
   async init(): Promise<void> {
     if (!isInitializing) {
       isInitializing = true;
-      try {
-        await this.fetchAll();
-      } catch (e) {}
+      try { await this.fetchAll(); } catch (e) {}
       isInitializing = false;
     }
   },
@@ -127,8 +119,7 @@ export const db = {
 
   async saveUser(user: User): Promise<void> {
     const data = await this.fetchAll();
-    const cleanEmail = user.email.toLowerCase().trim();
-    if (!data.users.some(u => u.email.toLowerCase().trim() === cleanEmail)) {
+    if (!data.users.some(u => u.email.toLowerCase() === user.email.toLowerCase())) {
       data.users.push(user);
       await this.sync(data, true); 
     }
