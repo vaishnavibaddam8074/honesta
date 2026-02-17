@@ -1,10 +1,10 @@
 import { User, FoundItem } from '../types';
 
 /**
- * HONESTA OPTIMIZED CLOUD ENGINE
- * Uses a memory-resident singleton to provide "Instant-On" performance.
+ * HONESTA CLOUD ENGINE v2.0
+ * High-reliability persistence layer with auto-initialization.
  */
-const BLOB_ID = '1343135804561825792';
+const BLOB_ID = '1343135804561825792'; // Unique HONESTA instance ID
 const API_URL = `https://jsonblob.com/api/jsonBlob/${BLOB_ID}`; 
 
 interface CloudData {
@@ -13,43 +13,36 @@ interface CloudData {
 }
 
 const INITIAL_DATA: CloudData = { users: [], items: [] };
-const MAX_ITEMS = 25; 
+const MAX_ITEMS = 30; 
 
-// Internal Singleton Cache
+// Internal Memory Cache
 let memoryCache: CloudData | null = null;
-let isFetching = false;
+let isInitializing = false;
 
 export const db = {
   /**
-   * Warm up the database in memory. Call this as early as possible.
+   * Safe fetch with retry and timeout
    */
-  async init(): Promise<void> {
-    if (memoryCache) return;
-    try {
-      await this.fetchAll();
-    } catch (e) {
-      console.warn("Warm up failed, will retry on next action.");
-    }
-  },
+  async safeFetch(url: string, options: RequestInit, retries = 2): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
-  async safeFetch(url: string, options: RequestInit, retries = 3): Promise<Response> {
-    const timestamp = Date.now();
-    const finalUrl = url.includes('?') ? `${url}&_t=${timestamp}` : `${url}?_t=${timestamp}`;
-    
     try {
-      const response = await fetch(finalUrl, {
+      const response = await fetch(url, {
         ...options,
-        mode: 'cors',
+        signal: controller.signal,
         headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
           ...options.headers,
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
         }
       });
-      if (!response.ok && retries > 0) throw new Error("Retry");
+      clearTimeout(timeoutId);
       return response;
     } catch (err) {
+      clearTimeout(timeoutId);
       if (retries > 0) {
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 1000));
         return this.safeFetch(url, options, retries - 1);
       }
       throw err;
@@ -57,61 +50,69 @@ export const db = {
   },
 
   /**
-   * Fetches data with Memory-First strategy.
-   * If data is in memory, returns it instantly and refreshes in background.
+   * Initializes or fetches the master dataset
    */
   async fetchAll(): Promise<CloudData> {
-    if (isFetching && memoryCache) return memoryCache;
+    if (memoryCache) return memoryCache;
 
-    const performFetch = async () => {
-      isFetching = true;
+    try {
+      const response = await this.safeFetch(API_URL, { method: 'GET' });
+      
+      if (response.status === 404) {
+        // Blob doesn't exist yet, initialize it
+        await this.sync(INITIAL_DATA);
+        memoryCache = INITIAL_DATA;
+        return INITIAL_DATA;
+      }
+
+      const data = await response.json();
+      const sanitized: CloudData = {
+        users: Array.isArray(data?.users) ? data.users : [],
+        items: Array.isArray(data?.items) ? data.items : []
+      };
+      
+      memoryCache = sanitized;
+      localStorage.setItem('honesta_backup', JSON.stringify(sanitized));
+      return sanitized;
+    } catch (error) {
+      console.warn("Cloud offline, loading local backup...");
+      const backup = localStorage.getItem('honesta_backup');
+      memoryCache = backup ? JSON.parse(backup) : INITIAL_DATA;
+      return memoryCache!;
+    }
+  },
+
+  /**
+   * Performs the actual Cloud Sync
+   * @param wait - If true, the promise won't resolve until the network call finishes.
+   */
+  async sync(data: CloudData, wait = false): Promise<void> {
+    memoryCache = data;
+    localStorage.setItem('honesta_backup', JSON.stringify(data));
+
+    const performSync = async () => {
       try {
-        const response = await this.safeFetch(API_URL, { method: 'GET' });
-        const data = await response.json();
-        const sanitized = {
-          users: Array.isArray(data?.users) ? data.users : [],
-          items: Array.isArray(data?.items) ? data.items : []
-        };
-        memoryCache = sanitized;
-        localStorage.setItem('honesta_master_cache', JSON.stringify(sanitized));
-        return sanitized;
-      } catch (error) {
-        console.error("Database Connectivity Issue:", error);
-        if (!memoryCache) {
-          const cache = localStorage.getItem('honesta_master_cache');
-          memoryCache = cache ? JSON.parse(cache) : INITIAL_DATA;
-        }
-        return memoryCache!;
-      } finally {
-        isFetching = false;
+        await this.safeFetch(API_URL, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        });
+      } catch (err) {
+        console.error("Cloud Sync failed (Retrying later):", err);
       }
     };
 
-    if (memoryCache) {
-      performFetch(); // Background refresh
-      return memoryCache;
+    if (wait) {
+      await performSync();
+    } else {
+      performSync(); // Fire and forget for UX speed
     }
-    return performFetch(); // First load
   },
 
-  async sync(data: CloudData): Promise<void> {
-    // Update local memory immediately for UI responsiveness
-    memoryCache = data;
-    localStorage.setItem('honesta_master_cache', JSON.stringify(data));
-
-    try {
-      if (data.items.length > MAX_ITEMS) {
-        data.items = data.items.slice(0, MAX_ITEMS);
-      }
-      const response = await this.safeFetch(API_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error("Cloud Sync Failed");
-    } catch (error) {
-      console.error("Cloud Sync Error (Background):", error);
-      // We don't throw here to keep the UI snappy, but we'll retry next fetch
+  async init(): Promise<void> {
+    if (!isInitializing) {
+      isInitializing = true;
+      await this.fetchAll();
+      isInitializing = false;
     }
   },
 
@@ -123,9 +124,13 @@ export const db = {
   async saveUser(user: User): Promise<void> {
     const data = await this.fetchAll();
     const cleanEmail = user.email.toLowerCase().trim();
-    if (!data.users.find(u => u.email.toLowerCase().trim() === cleanEmail)) {
+    
+    // Avoid duplicates
+    const exists = data.users.some(u => u.email.toLowerCase().trim() === cleanEmail);
+    if (!exists) {
       data.users.push(user);
-      await this.sync(data);
+      // We WAIT for sync during registration to ensure account safety
+      await this.sync(data, true); 
     }
   },
 
@@ -136,7 +141,7 @@ export const db = {
 
   async saveItem(item: FoundItem): Promise<void> {
     const data = await this.fetchAll();
-    data.items = [item, ...data.items];
+    data.items = [item, ...data.items].slice(0, MAX_ITEMS);
     await this.sync(data);
   },
 
