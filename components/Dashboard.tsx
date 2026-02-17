@@ -12,6 +12,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [showCamera, setShowCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [uploadStep, setUploadStep] = useState<'none' | 'preview' | 'vivaChoice' | 'manualViva' | 'thankYou'>('none');
   const [manualQuestions, setManualQuestions] = useState([{ q: '', a: '' }]);
@@ -31,7 +32,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(() => refreshData(false), 8000); 
+    const interval = setInterval(() => refreshData(false), 10000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -58,7 +59,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         }
       }
     } catch (e) {
-      console.error("Background refresh failed", e);
+      console.error("Refresh Error", e);
     } finally {
       if (showLoading) setIsRefreshing(false);
     }
@@ -111,7 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         setShowCamera(true);
       }
     } catch (err) { 
-      alert("Camera access denied. Please enable camera permissions for HONESTA."); 
+      alert("Camera access denied. Enable permissions in settings."); 
     }
   };
 
@@ -138,14 +139,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const finalizeUpload = async (useAI: boolean) => {
     if (!capturedImage) return;
     setIsUploading(true);
+    setUploadProgress('Starting AI analysis...');
+    
+    let aiData;
+    
     try {
-      let aiData;
-      
       if (useAI) {
-        // Step 1: Analyze with AI
         aiData = await generateVerificationQuestions(capturedImage);
       } else {
-        // Step 1: Manual Input
         const limitedManual = manualQuestions.slice(0, 3);
         aiData = {
           title: "Found Item",
@@ -153,14 +154,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
           answers: limitedManual.map(m => m.a)
         };
       }
-
-      // Step 2: Image Processing
+      
+      setUploadProgress('Compressing images for network...');
       const [bwImage, compressedOrig] = await Promise.all([
         convertToBlackAndWhite(capturedImage),
         compressOriginalImage(capturedImage)
       ]);
       
-      // Step 3: Cloud Sync
+      setUploadProgress('Syncing to CMRIT Feed...');
       const itemId = Math.random().toString(36).substr(2, 6).toUpperCase();
       const newItem: FoundItem = {
         id: itemId,
@@ -179,13 +180,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       
       await db.saveItem(newItem);
       setUploadStep('thankYou');
-      triggerToast("Broadcast synchronization complete! ✅");
+      triggerToast("Post Live on CMRIT Feed! ✅");
       refreshData(false);
     } catch (err: any) { 
-      console.error("Upload process error:", err);
-      alert("Cloud synchronization failure. Please ensure your campus internet is stable and try again."); 
+      console.error("Reporting Error", err);
+      alert("Network Sync Failed: Campus Wi-Fi might be slow. Please wait a moment and try again."); 
     } finally { 
       setIsUploading(false); 
+      setUploadProgress('');
     }
   };
 
@@ -204,7 +206,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         recordFailedAttempt(selectedItem.id);
       }
     } catch (err) { 
-      alert("Verification server busy. Please retry in a moment."); 
+      alert("Verification server timed out. Check connection."); 
     } finally { 
       setIsVerifying(false); 
     }
@@ -221,26 +223,26 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   };
 
   const markAsHandovered = async (itemToUpdate: FoundItem) => {
-    if (confirm("Confirm: Has the item been successfully returned to its owner?")) {
+    if (confirm("Confirm: Has this item been returned safely?")) {
       try {
         const updatedItem: FoundItem = { ...itemToUpdate, status: 'handovered' };
         await db.updateItem(updatedItem);
-        triggerToast("Thank you for returning the item safely! Honesty wins! 🌟");
+        triggerToast("Triumph! Honesty makes CMRIT better. 🌟");
         await refreshData();
       } catch (e) {
-        alert("Failed to update status. Please try again.");
+        alert("Sync error. Try again.");
       }
     }
   };
 
   const handleDeletePost = async (itemId: string) => {
-    if (confirm("Permanently delete this report?")) {
+    if (confirm("Delete this report forever?")) {
       try {
         await db.deleteItem(itemId);
         await refreshData();
         if (selectedItem?.id === itemId) setSelectedItem(null);
       } catch (e) {
-        alert("Failed to delete post.");
+        alert("Delete failed.");
       }
     }
   };
@@ -258,13 +260,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       <div className={`fixed bottom-8 left-8 flex items-center space-x-2 px-4 py-2 bg-white/90 backdrop-blur rounded-full shadow-lg border border-gray-100 z-50`}>
         <div className={`w-2 h-2 rounded-full ${isRefreshing ? 'bg-indigo-500 animate-pulse' : 'bg-green-500'}`}></div>
         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-          {isRefreshing ? 'Cloud Syncing...' : 'Live Connection'}
+          {isRefreshing ? 'Syncing...' : 'CMRIT Online'}
         </span>
       </div>
 
       <div className="mb-14 max-w-2xl mx-auto">
         <input
-          type="text" placeholder="Search CMRIT Feed..."
+          type="text" placeholder="Search the feed..."
           className="w-full px-8 py-6 bg-white border-2 border-gray-50 rounded-[2.5rem] shadow-xl outline-none text-xl font-bold transition-all focus:border-indigo-100"
           value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
         />
@@ -278,7 +280,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             {uploadStep === 'none' && !showCamera && (
               <div className="space-y-4">
                 <button onClick={startCamera} className="w-full flex items-center justify-between bg-indigo-600 text-white font-black p-6 rounded-[2rem] shadow-lg active:scale-95 transition-all">
-                  <span className="text-lg uppercase">Camera Scan</span>
+                  <span className="text-lg uppercase">Scan Item</span>
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 </button>
                 <div className="relative">
@@ -286,7 +288,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300"><span className="bg-white px-2 tracking-widest">or</span></div>
                 </div>
                 <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between bg-gray-50 text-indigo-800 font-black p-6 rounded-[2rem] border-2 border-dashed border-gray-200 hover:bg-indigo-50 transition-all">
-                  <span className="text-lg uppercase">Gallery</span>
+                  <span className="text-lg uppercase">From Gallery</span>
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 </button>
                 <input type="file" ref={fileInputRef} onChange={(e) => {
@@ -304,9 +306,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
               <div className="space-y-4 animate-in fade-in zoom-in-95">
                 <div className="relative rounded-[2.5rem] overflow-hidden bg-black aspect-square shadow-2xl border-4 border-indigo-600/20">
                   <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 border-[20px] border-black/10 pointer-events-none"></div>
                 </div>
-                <button onClick={capturePhoto} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black shadow-xl text-xl uppercase tracking-tighter active:scale-95 transition-all">Capture Frame</button>
+                <button onClick={capturePhoto} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black shadow-xl text-xl uppercase tracking-tighter active:scale-95 transition-all">Capture Now</button>
                 <button onClick={stopCamera} className="w-full text-gray-400 py-2 font-black text-[10px] uppercase tracking-widest text-center">Cancel</button>
               </div>
             )}
@@ -323,20 +324,27 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
             {uploadStep === 'vivaChoice' && (
               <div className="space-y-4 text-center py-4">
-                <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest mb-6">Security Layer</h4>
-                <button onClick={() => finalizeUpload(true)} disabled={isUploading} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-sm shadow-lg disabled:opacity-50 hover:bg-indigo-700 transition-all flex items-center justify-center space-x-3">
-                  {isUploading ? <span className="animate-pulse italic">Connecting AI...</span> : <span>AI Intelligent Scan</span>}
+                <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest mb-6">Verification Method</h4>
+                <button onClick={() => finalizeUpload(true)} disabled={isUploading} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-sm shadow-lg disabled:opacity-50 hover:bg-indigo-700 transition-all flex flex-col items-center justify-center">
+                  {isUploading ? (
+                    <div className="flex flex-col items-center">
+                       <span className="animate-pulse mb-1">Processing...</span>
+                       <span className="text-[8px] opacity-70 tracking-widest uppercase">{uploadProgress}</span>
+                    </div>
+                  ) : (
+                    <span>AI Intelligent Viva</span>
+                  )}
                 </button>
-                <button onClick={() => setUploadStep('manualViva')} className="w-full bg-white border-2 border-indigo-600 text-indigo-600 py-6 rounded-[2rem] font-black text-sm uppercase tracking-widest">Manual Challenge</button>
+                <button onClick={() => setUploadStep('manualViva')} className="w-full bg-white border-2 border-indigo-600 text-indigo-600 py-6 rounded-[2rem] font-black text-sm uppercase tracking-widest">Manual Setup</button>
               </div>
             )}
 
             {uploadStep === 'manualViva' && (
               <div className="space-y-4">
-                <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest text-center mb-2">Max 3 Questions</h4>
+                <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest text-center mb-2">Set 2-3 Questions</h4>
                 {manualQuestions.map((mq, idx) => (
                   <div key={idx} className="space-y-2 p-4 bg-gray-50 rounded-[2rem] border border-gray-100">
-                    <input type="text" placeholder="What is the color/brand?" className="w-full bg-white px-4 py-3 rounded-xl font-bold text-xs outline-none"
+                    <input type="text" placeholder="Question (e.g. Color?)" className="w-full bg-white px-4 py-3 rounded-xl font-bold text-xs outline-none"
                       value={mq.q} onChange={e => { const n = [...manualQuestions]; n[idx].q = e.target.value; setManualQuestions(n); }} />
                     <input type="text" placeholder="Secret Answer" className="w-full bg-white px-4 py-3 rounded-xl font-bold text-xs outline-none"
                       value={mq.a} onChange={e => { const n = [...manualQuestions]; n[idx].a = e.target.value; setManualQuestions(n); }} />
@@ -346,7 +354,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <button onClick={() => setManualQuestions([...manualQuestions, { q: '', a: '' }])} className="text-[10px] font-black text-indigo-500 py-1 w-full uppercase tracking-widest">+ Add Field</button>
                 )}
                 <button onClick={() => finalizeUpload(false)} disabled={isUploading || manualQuestions.some(m => !m.q || !m.a)} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black shadow-lg uppercase tracking-tighter">
-                  {isUploading ? 'Syncing...' : 'Publish Report'}
+                  {isUploading ? (
+                    <div className="flex flex-col items-center">
+                      <span className="animate-pulse mb-1">Publishing...</span>
+                      <span className="text-[8px] opacity-70 tracking-widest uppercase">{uploadProgress}</span>
+                    </div>
+                  ) : 'Finish Report'}
                 </button>
               </div>
             )}
@@ -356,9 +369,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                 <div className="w-24 h-24 bg-green-50 text-green-600 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-inner">
                   <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"/></svg>
                 </div>
-                <h4 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Broadcast Live</h4>
-                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-10 leading-relaxed px-4">Thank you for your honesty, {user.fullName}! Your report has been successfully synchronized with the campus network.</p>
-                <button onClick={() => { setUploadStep('none'); setCapturedImage(null); setManualQuestions([{q:'',a:''}]); refreshData(); }} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl hover:bg-black transition-all">Back to Feed</button>
+                <h4 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Broadcasted!</h4>
+                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-10 leading-relaxed px-4">Thank you for your honesty, {user.fullName}. Your report is live for the CMRIT community.</p>
+                <button onClick={() => { setUploadStep('none'); setCapturedImage(null); setManualQuestions([{q:'',a:''}]); refreshData(); }} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl hover:bg-black transition-all">Return to Feed</button>
               </div>
             )}
             <canvas ref={canvasRef} className="hidden" />
@@ -378,11 +391,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                         setUserAnswers(new Array(item.verificationQuestions.length).fill('')); 
                         setVerificationResult('idle'); 
                         checkLockout(item.id);
-                      }} className="w-full bg-white text-gray-900 py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-2xl">Verify Ownership</button>
+                      }} className="w-full bg-white text-gray-900 py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-2xl">Claim Ownership</button>
                     </div>
                   ) : (
                     <div className="absolute inset-0 bg-green-600/80 flex items-center justify-center p-6 backdrop-blur">
-                       <span className="text-white font-black text-xl border-4 border-white px-6 py-2 rounded-2xl rotate-[-5deg] shadow-2xl uppercase text-center">Returned Safely ✅</span>
+                       <span className="text-white font-black text-xl border-4 border-white px-6 py-2 rounded-2xl rotate-[-5deg] shadow-2xl uppercase text-center">Safe Handover ✅</span>
                     </div>
                   )}
                   <div className="absolute top-4 left-4">
@@ -392,7 +405,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                 <div className="p-8">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-xl font-black text-gray-900 tracking-tighter">Found by {item.founderName}</p>
+                      <p className="text-xl font-black text-gray-900 tracking-tighter">Founder: {item.founderName}</p>
                       <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{new Date(item.timestamp).toLocaleDateString()}</p>
                     </div>
                   </div>
@@ -422,8 +435,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             {verificationResult === 'idle' && selectedItem.founderId !== user.id && (
               <div className="space-y-8 py-4">
                 <div className="text-center">
-                  <h4 className="text-3xl font-black text-gray-900 tracking-tighter">Ownership Verification</h4>
-                  <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-2">Maximum 3 Attempts allowed every 2 hours</p>
+                  <h4 className="text-3xl font-black text-gray-900 tracking-tighter">Ownership Viva</h4>
+                  <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-2">Maximum 3 tries allowed</p>
                 </div>
                 {selectedItem.verificationQuestions.map((q, idx) => (
                   <div key={idx} className="space-y-3">
@@ -433,7 +446,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   </div>
                 ))}
                 <button onClick={handleClaim} disabled={isVerifying || userAnswers.some(a => !a.trim())} className="w-full bg-indigo-600 text-white font-black py-6 rounded-[2rem] shadow-xl text-xl tracking-tighter uppercase">
-                  {isVerifying ? 'Authenticating...' : 'Submit Evidence'}
+                  {isVerifying ? 'Authenticating...' : 'Verify Me'}
                 </button>
               </div>
             )}
@@ -443,17 +456,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                 <div className="w-24 h-24 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-10 shadow-inner">
                   <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeWidth="2.5"/></svg>
                 </div>
-                <h5 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Access Locked</h5>
-                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-2 leading-relaxed">Security policy: 3 failed attempts.</p>
+                <h5 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Access Denied</h5>
+                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-2 leading-relaxed">Security policy: Too many failed attempts.</p>
                 <p className="text-indigo-600 font-black uppercase text-xs tracking-widest">Retry in: {lockoutInfo}</p>
-                <button onClick={() => setSelectedItem(null)} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black mt-14 shadow-2xl hover:bg-black transition-all uppercase tracking-widest text-sm">Return to Feed</button>
+                <button onClick={() => setSelectedItem(null)} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black mt-14 shadow-2xl hover:bg-black transition-all uppercase tracking-widest text-sm text-center">Close</button>
               </div>
             )}
 
             {(verificationResult === 'success' || selectedItem.founderId === user.id || selectedItem.status === 'handovered') && (
               <div className="flex flex-col h-[75vh] animate-in slide-in-from-bottom-8">
                 <div className="text-center pb-8 border-b border-gray-100">
-                  <h5 className="text-3xl font-black text-gray-900 tracking-tighter">Verified Channel</h5>
+                  <h5 className="text-3xl font-black text-gray-900 tracking-tighter">Direct Connect</h5>
                   <div className="bg-indigo-50 text-indigo-700 px-8 py-3 rounded-full inline-block mt-4 font-black text-sm tracking-widest shadow-sm">{selectedItem.founderPhone}</div>
                 </div>
                 <div className="flex-grow overflow-y-auto py-8 space-y-4 px-4">
@@ -469,14 +482,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                 </div>
                 {selectedItem.status === 'available' ? (
                   <div className="pt-4 flex space-x-3">
-                    <input type="text" className="flex-grow px-8 py-5 bg-gray-50 border-2 border-gray-100 rounded-[2rem] outline-none font-black text-lg shadow-inner" placeholder="Message founder..."
+                    <input type="text" className="flex-grow px-8 py-5 bg-gray-50 border-2 border-gray-100 rounded-[2rem] outline-none font-black text-lg shadow-inner" placeholder="Send a message..."
                       value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} />
                     <button onClick={sendMessage} className="bg-indigo-600 text-white w-20 rounded-[2rem] shadow-xl flex items-center justify-center active:scale-90 transition-all">
                       <svg className="w-8 h-8 rotate-45" fill="currentColor" viewBox="0 0 20 20"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/></svg>
                     </button>
                   </div>
                 ) : (
-                  <div className="text-center py-4 bg-green-50 text-green-700 rounded-[2rem] font-black uppercase text-xs tracking-widest border border-green-100">Closed - Item Handovered ✅</div>
+                  <div className="text-center py-4 bg-green-50 text-green-700 rounded-[2rem] font-black uppercase text-xs tracking-widest border border-green-100">Item Successfully Returned ✅</div>
                 )}
               </div>
             )}
@@ -484,11 +497,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             {verificationResult === 'fail' && (
               <div className="text-center py-20 animate-in zoom-in-95">
                 <div className="w-24 h-24 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-10 shadow-inner">
-                  <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="5"/></svg>
+                  <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="4"/></svg>
                 </div>
-                <h5 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Verification Denied</h5>
-                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Ownership check failed. Attempt recorded.</p>
-                <button onClick={() => setVerificationResult('idle')} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black mt-14 shadow-2xl hover:bg-black transition-all uppercase tracking-widest text-sm">Try Again</button>
+                <h5 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Wrong Answer</h5>
+                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Ownership verification failed. Attempt recorded.</p>
+                <button onClick={() => setVerificationResult('idle')} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black mt-14 shadow-2xl hover:bg-black transition-all uppercase tracking-widest text-sm">Retry Carefully</button>
               </div>
             )}
           </div>

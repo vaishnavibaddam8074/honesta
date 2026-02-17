@@ -1,8 +1,8 @@
 import { User, FoundItem } from '../types';
 
 /**
- * HONESTA CLOUD ENGINE v2.1
- * Enhanced reliability for JSONBlob persistence.
+ * HONESTA CLOUD ENGINE v2.2
+ * Highly resilient storage for CMRIT campus networks.
  */
 const BLOB_ID = '1343135804561825792'; 
 const BASE_URL = `https://jsonblob.com/api/jsonBlob`;
@@ -20,9 +20,12 @@ let memoryCache: CloudData | null = null;
 let isInitializing = false;
 
 export const db = {
-  async safeFetch(url: string, options: RequestInit, retries = 2): Promise<Response> {
+  /**
+   * Safe fetch with extended 25s timeout for spotty CMRIT Wi-Fi
+   */
+  async safeFetch(url: string, options: RequestInit, retries = 3): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); 
+    const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
     try {
       const response = await fetch(url, {
@@ -39,7 +42,8 @@ export const db = {
     } catch (err) {
       clearTimeout(timeoutId);
       if (retries > 0) {
-        await new Promise(r => setTimeout(r, 1500));
+        console.warn(`Fetch failed, retrying... (${retries} left)`);
+        await new Promise(r => setTimeout(r, 2000));
         return this.safeFetch(url, options, retries - 1);
       }
       throw err;
@@ -53,7 +57,6 @@ export const db = {
       const response = await this.safeFetch(API_URL, { method: 'GET' });
       
       if (response.status === 404) {
-        console.warn("Blob missing, re-initializing HONESTA storage...");
         await this.sync(INITIAL_DATA, true);
         memoryCache = INITIAL_DATA;
         return INITIAL_DATA;
@@ -69,7 +72,7 @@ export const db = {
       localStorage.setItem('honesta_backup', JSON.stringify(sanitized));
       return sanitized;
     } catch (error) {
-      console.warn("Network offline, loading local HONESTA backup...");
+      console.warn("Cloud disconnected, using local storage backup.");
       const backup = localStorage.getItem('honesta_backup');
       memoryCache = backup ? JSON.parse(backup) : INITIAL_DATA;
       return memoryCache!;
@@ -82,21 +85,21 @@ export const db = {
 
     const performSync = async () => {
       try {
-        // Try PUT first
         const putRes = await this.safeFetch(API_URL, {
           method: 'PUT',
           body: JSON.stringify(data),
         });
 
-        // If blob was deleted or expired, recreate it via POST to the base URL
         if (putRes.status === 404) {
+          // If the hardcoded blob is gone, we try to re-init it
           await this.safeFetch(BASE_URL, {
             method: 'POST',
             body: JSON.stringify(data),
           });
+          console.warn("New storage bucket created due to 404.");
         }
       } catch (err) {
-        console.error("Critical Cloud Sync failure:", err);
+        console.error("Cloud Sync failed completely. Data saved locally only.");
       }
     };
 
@@ -112,9 +115,7 @@ export const db = {
       isInitializing = true;
       try {
         await this.fetchAll();
-      } catch (e) {
-        console.error("DB Initialization failed");
-      }
+      } catch (e) {}
       isInitializing = false;
     }
   },
@@ -127,8 +128,7 @@ export const db = {
   async saveUser(user: User): Promise<void> {
     const data = await this.fetchAll();
     const cleanEmail = user.email.toLowerCase().trim();
-    const exists = data.users.some(u => u.email.toLowerCase().trim() === cleanEmail);
-    if (!exists) {
+    if (!data.users.some(u => u.email.toLowerCase().trim() === cleanEmail)) {
       data.users.push(user);
       await this.sync(data, true); 
     }
