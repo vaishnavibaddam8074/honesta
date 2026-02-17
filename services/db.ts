@@ -1,11 +1,12 @@
 import { User, FoundItem } from '../types';
 
 /**
- * HONESTA CLOUD ENGINE v2.0
- * High-reliability persistence layer with auto-initialization.
+ * HONESTA CLOUD ENGINE v2.1
+ * Enhanced reliability for JSONBlob persistence.
  */
-const BLOB_ID = '1343135804561825792'; // Unique HONESTA instance ID
-const API_URL = `https://jsonblob.com/api/jsonBlob/${BLOB_ID}`; 
+const BLOB_ID = '1343135804561825792'; 
+const BASE_URL = `https://jsonblob.com/api/jsonBlob`;
+const API_URL = `${BASE_URL}/${BLOB_ID}`; 
 
 interface CloudData {
   users: User[];
@@ -15,17 +16,13 @@ interface CloudData {
 const INITIAL_DATA: CloudData = { users: [], items: [] };
 const MAX_ITEMS = 30; 
 
-// Internal Memory Cache
 let memoryCache: CloudData | null = null;
 let isInitializing = false;
 
 export const db = {
-  /**
-   * Safe fetch with retry and timeout
-   */
   async safeFetch(url: string, options: RequestInit, retries = 2): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000); 
 
     try {
       const response = await fetch(url, {
@@ -33,7 +30,7 @@ export const db = {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
+          'Accept': 'application/json',
           ...options.headers,
         }
       });
@@ -42,16 +39,13 @@ export const db = {
     } catch (err) {
       clearTimeout(timeoutId);
       if (retries > 0) {
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1500));
         return this.safeFetch(url, options, retries - 1);
       }
       throw err;
     }
   },
 
-  /**
-   * Initializes or fetches the master dataset
-   */
   async fetchAll(): Promise<CloudData> {
     if (memoryCache) return memoryCache;
 
@@ -59,8 +53,8 @@ export const db = {
       const response = await this.safeFetch(API_URL, { method: 'GET' });
       
       if (response.status === 404) {
-        // Blob doesn't exist yet, initialize it
-        await this.sync(INITIAL_DATA);
+        console.warn("Blob missing, re-initializing HONESTA storage...");
+        await this.sync(INITIAL_DATA, true);
         memoryCache = INITIAL_DATA;
         return INITIAL_DATA;
       }
@@ -75,43 +69,52 @@ export const db = {
       localStorage.setItem('honesta_backup', JSON.stringify(sanitized));
       return sanitized;
     } catch (error) {
-      console.warn("Cloud offline, loading local backup...");
+      console.warn("Network offline, loading local HONESTA backup...");
       const backup = localStorage.getItem('honesta_backup');
       memoryCache = backup ? JSON.parse(backup) : INITIAL_DATA;
       return memoryCache!;
     }
   },
 
-  /**
-   * Performs the actual Cloud Sync
-   * @param wait - If true, the promise won't resolve until the network call finishes.
-   */
   async sync(data: CloudData, wait = false): Promise<void> {
     memoryCache = data;
     localStorage.setItem('honesta_backup', JSON.stringify(data));
 
     const performSync = async () => {
       try {
-        await this.safeFetch(API_URL, {
+        // Try PUT first
+        const putRes = await this.safeFetch(API_URL, {
           method: 'PUT',
           body: JSON.stringify(data),
         });
+
+        // If blob was deleted or expired, recreate it via POST to the base URL
+        if (putRes.status === 404) {
+          await this.safeFetch(BASE_URL, {
+            method: 'POST',
+            body: JSON.stringify(data),
+          });
+        }
       } catch (err) {
-        console.error("Cloud Sync failed (Retrying later):", err);
+        console.error("Critical Cloud Sync failure:", err);
       }
     };
 
     if (wait) {
       await performSync();
     } else {
-      performSync(); // Fire and forget for UX speed
+      performSync();
     }
   },
 
   async init(): Promise<void> {
     if (!isInitializing) {
       isInitializing = true;
-      await this.fetchAll();
+      try {
+        await this.fetchAll();
+      } catch (e) {
+        console.error("DB Initialization failed");
+      }
       isInitializing = false;
     }
   },
@@ -124,12 +127,9 @@ export const db = {
   async saveUser(user: User): Promise<void> {
     const data = await this.fetchAll();
     const cleanEmail = user.email.toLowerCase().trim();
-    
-    // Avoid duplicates
     const exists = data.users.some(u => u.email.toLowerCase().trim() === cleanEmail);
     if (!exists) {
       data.users.push(user);
-      // We WAIT for sync during registration to ensure account safety
       await this.sync(data, true); 
     }
   },
@@ -142,18 +142,18 @@ export const db = {
   async saveItem(item: FoundItem): Promise<void> {
     const data = await this.fetchAll();
     data.items = [item, ...data.items].slice(0, MAX_ITEMS);
-    await this.sync(data);
+    await this.sync(data, true); 
   },
 
   async updateItem(updatedItem: FoundItem): Promise<void> {
     const data = await this.fetchAll();
     data.items = data.items.map(it => it.id === updatedItem.id ? updatedItem : it);
-    await this.sync(data);
+    await this.sync(data, true);
   },
 
   async deleteItem(itemId: string): Promise<void> {
     const data = await this.fetchAll();
     data.items = data.items.filter(it => it.id !== itemId);
-    await this.sync(data);
+    await this.sync(data, true);
   }
 };

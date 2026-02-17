@@ -31,7 +31,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(() => refreshData(false), 5000); 
+    const interval = setInterval(() => refreshData(false), 8000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -48,17 +48,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     if (showLoading) setIsRefreshing(true);
     try {
       const cloudItems = await db.getItems();
-      const sorted = cloudItems.sort((a, b) => b.timestamp - a.timestamp);
-      if (JSON.stringify(sorted) !== JSON.stringify(items)) {
-        setItems(sorted);
-      }
+      const sorted = [...cloudItems].sort((a, b) => b.timestamp - a.timestamp);
+      setItems(sorted);
       if (selectedItem) {
         const fresh = cloudItems.find(it => it.id === selectedItem.id);
         if (!fresh) setSelectedItem(null);
-        else if (JSON.stringify(fresh) !== JSON.stringify(selectedItem)) setSelectedItem(fresh);
+        else if (JSON.stringify(fresh.messages) !== JSON.stringify(selectedItem.messages)) {
+          setSelectedItem(fresh);
+        }
       }
     } catch (e) {
-      console.error("Sync Failure", e);
+      console.error("Background refresh failed", e);
     } finally {
       if (showLoading) setIsRefreshing(false);
     }
@@ -81,7 +81,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       return true;
     }
     
-    // Reset if time passed
     if (timePassed >= twoHours) {
       localStorage.removeItem(getAttemptKey(itemId));
     }
@@ -112,7 +111,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         setShowCamera(true);
       }
     } catch (err) { 
-      alert("Camera access denied. Please allow permissions in your browser."); 
+      alert("Camera access denied. Please enable camera permissions for HONESTA."); 
     }
   };
 
@@ -140,11 +139,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     if (!capturedImage) return;
     setIsUploading(true);
     try {
-      let aiData = { title: "Found Item", questions: ["Describe the item."], answers: ["any"] };
+      let aiData;
       
       if (useAI) {
+        // Step 1: Analyze with AI
         aiData = await generateVerificationQuestions(capturedImage);
       } else {
+        // Step 1: Manual Input
         const limitedManual = manualQuestions.slice(0, 3);
         aiData = {
           title: "Found Item",
@@ -153,15 +154,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         };
       }
 
+      // Step 2: Image Processing
       const [bwImage, compressedOrig] = await Promise.all([
         convertToBlackAndWhite(capturedImage),
         compressOriginalImage(capturedImage)
       ]);
       
+      // Step 3: Cloud Sync
       const itemId = Math.random().toString(36).substr(2, 6).toUpperCase();
       const newItem: FoundItem = {
         id: itemId,
-        title: aiData.title,
+        title: aiData.title || "Found Item",
         imageUrl: bwImage, 
         originalImageUrl: compressedOrig,
         founderId: user.id,
@@ -169,17 +172,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         founderPhone: user.phoneNumber,
         timestamp: Date.now(),
         status: 'available',
-        verificationQuestions: aiData.questions.slice(0, 3),
-        verificationAnswers: aiData.answers.slice(0, 3),
+        verificationQuestions: aiData.questions.length > 0 ? aiData.questions : ["Describe the item."],
+        verificationAnswers: aiData.answers.length > 0 ? aiData.answers : ["any"],
         messages: []
       };
       
       await db.saveItem(newItem);
       setUploadStep('thankYou');
-      triggerToast("Thank you for your honesty! 🤝");
+      triggerToast("Broadcast synchronization complete! ✅");
       refreshData(false);
     } catch (err: any) { 
-      alert("Reporting failure. Check campus network connection."); 
+      console.error("Upload process error:", err);
+      alert("Cloud synchronization failure. Please ensure your campus internet is stable and try again."); 
     } finally { 
       setIsUploading(false); 
     }
@@ -194,13 +198,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
       const isCorrect = await verifyAnswers(selectedItem.verificationQuestions, userAnswers, selectedItem.verificationAnswers);
       if (isCorrect) {
         setVerificationResult('success');
-        localStorage.removeItem(getAttemptKey(selectedItem.id)); // Clear lockout on success
+        localStorage.removeItem(getAttemptKey(selectedItem.id));
       } else {
         setVerificationResult('fail');
         recordFailedAttempt(selectedItem.id);
       }
     } catch (err) { 
-      alert("Verification timeout. Retrying..."); 
+      alert("Verification server busy. Please retry in a moment."); 
     } finally { 
       setIsVerifying(false); 
     }
@@ -217,19 +221,27 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   };
 
   const markAsHandovered = async (itemToUpdate: FoundItem) => {
-    if (confirm("Confirm: Item successfully returned to rightful owner?")) {
-      const updatedItem: FoundItem = { ...itemToUpdate, status: 'handovered' };
-      await db.updateItem(updatedItem);
-      triggerToast("Thank you for returning the item safely! Honesty wins! 🌟");
-      await refreshData();
+    if (confirm("Confirm: Has the item been successfully returned to its owner?")) {
+      try {
+        const updatedItem: FoundItem = { ...itemToUpdate, status: 'handovered' };
+        await db.updateItem(updatedItem);
+        triggerToast("Thank you for returning the item safely! Honesty wins! 🌟");
+        await refreshData();
+      } catch (e) {
+        alert("Failed to update status. Please try again.");
+      }
     }
   };
 
   const handleDeletePost = async (itemId: string) => {
     if (confirm("Permanently delete this report?")) {
-      await db.deleteItem(itemId);
-      await refreshData();
-      if (selectedItem?.id === itemId) setSelectedItem(null);
+      try {
+        await db.deleteItem(itemId);
+        await refreshData();
+        if (selectedItem?.id === itemId) setSelectedItem(null);
+      } catch (e) {
+        alert("Failed to delete post.");
+      }
     }
   };
 
@@ -313,7 +325,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
               <div className="space-y-4 text-center py-4">
                 <h4 className="font-black text-gray-900 uppercase text-[10px] tracking-widest mb-6">Security Layer</h4>
                 <button onClick={() => finalizeUpload(true)} disabled={isUploading} className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-sm shadow-lg disabled:opacity-50 hover:bg-indigo-700 transition-all flex items-center justify-center space-x-3">
-                  {isUploading ? <span className="animate-pulse italic">Synchronizing AI...</span> : <span>AI Intelligent Scan</span>}
+                  {isUploading ? <span className="animate-pulse italic">Connecting AI...</span> : <span>AI Intelligent Scan</span>}
                 </button>
                 <button onClick={() => setUploadStep('manualViva')} className="w-full bg-white border-2 border-indigo-600 text-indigo-600 py-6 rounded-[2rem] font-black text-sm uppercase tracking-widest">Manual Challenge</button>
               </div>
@@ -345,7 +357,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"/></svg>
                 </div>
                 <h4 className="text-4xl font-black text-gray-900 mb-4 tracking-tighter">Broadcast Live</h4>
-                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-10 leading-relaxed px-4">Thank you for your honesty, {user.fullName}! Your report has been synchronized with the campus network.</p>
+                <p className="text-gray-400 font-bold uppercase text-[10px] tracking-widest mb-10 leading-relaxed px-4">Thank you for your honesty, {user.fullName}! Your report has been successfully synchronized with the campus network.</p>
                 <button onClick={() => { setUploadStep('none'); setCapturedImage(null); setManualQuestions([{q:'',a:''}]); refreshData(); }} className="w-full py-6 bg-gray-900 text-white rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl hover:bg-black transition-all">Back to Feed</button>
               </div>
             )}
